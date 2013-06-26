@@ -3,6 +3,7 @@ import socket
 import os
 import struct
 import hashlib
+from package_header import *
 
 
 class Server:
@@ -21,24 +22,30 @@ class Server:
 		m.update(address)
 		m.update(str(port))
 		self.hash_code = m.hexdigest()
+		self.next_node = {}
 
-		if (os.path.exist(config_path) == True):
-			f = open(config_path, 'r')
+		if (os.path.exists(Server.config_path) == True):
+			f = open(Server.config_path, 'r')
 			entry_point = f.readline().split(':')
 			f.close()
 			self.next_node = self.insert(address = entry_point[0], port = int(entry_point[1]))
 		else:
-			f = open(config_path, "w")
+			print 'aa'
+			f = open(Server.config_path, "w")
 			f.write(self.address + ':' + str(port))
 			f.close()
 			self.next_node['address'] = self.address
 			self.next_node['port'] = self.port
 			self.next_node['hash_code'] = self.hash_code
 
-	def insert(address, port):
+	def insert(self, address, port):
+		next_node = {'address': self.address, 'port': self.port, 'hash_code': self.hash_code}
+		if (self.address == address and port == self.port):
+			return next_node
 		sock = self.connect_node(address, port)
 		sock.send('find,' + self.address + ',' + str(self.port) + ',' + str(self.hash_code))
 		sock.close()
+		return next_node
 
 	def connect_node(self, address, port):
 		sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -49,10 +56,14 @@ class Server:
 		if (first_node == self.next_node['address'] + ":" + str(self.next_node['port'])):
 			return ""
 		sock = connect(address, port)
-		sock.send('show,' + first_node)
-		ret = sock.recv(Server.buf_size)
+		buf = struct.pack(header_format, 'show', len(first_node))
+		sock.send(buf)
+		sock.send(first_node)
+		buf = sock.recv(header_len)
+		cmd, datalen = struct.unpack(header_format, buf)
+		buf = sock.recv(datalen)
 		sock.close()
-		return ret
+		return buf
 
 	def is_middle(left_node, right_node, mid_node):
 		if (left_node < right_node):
@@ -140,48 +151,64 @@ class Server:
 			fp.write(buf)
 			file_size = file_size - Server.buf_size
 		fp.close()
-		files.append(file_name)
+		self.files.append(file_name)
 
 	def run(self):
 		sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 		sock.bind((self.address, self.port))
 		print self.address, self.port
 		sock.listen(5)
+		header_format = '4si'
+		header_len = struct.calcsize(header_format)
 		while True:
 			connection, address = sock.accept()
-			buf = connection.recv(Server.buf_size)
-			s = buf.split(',')
-			print 'command', s[0]
-			if (s[0] == 'transfer'):
-				self.transfer_file(s[1], s[2], s[3])
-			elif (s[0] == 'find'):
-				print s[1], s[2], s[3]
-				self.find({'address': s[1], 'port': s[2], 'hash_code': s[3])
-			elif (s[0] == 'show'):
-				res = self.address + ':' + self.port + '\n'
-				for fname in files:
-					res = res + fname
-				if (len(s) > 1):
-					res = res + self.show_next(self.address, s[1])
+			buf = connection.recv(header_len)
+			cmd, datalen = struct.unpack(header_format, buf)
+			s = []
+			#print cmd, datalen
+			print cmd
+			if (datalen > 0):
+				buf = connection.recv(datalen)
+				s = buf.split(',')
+			#print s, datalen, buf
+			if (cmd == 'tran'):
+				self.transfer_file(s[0], s[1], s[2])
+			elif (cmd == 'find'):
+				print s[0], s[1], s[2]
+				self.find({'address': s[0], 'port': s[1], 'hash_code': s[2]})
+			elif (cmd == 'show'):
+				#print cmd
+				res = self.address + ':' + str(self.port) + '\n'
+				if (len(fname) > 0):
+					for fname in self.files:
+						res = res + ' ' + fname
 				else:
-					res = res + self.show_next(self.address, self.address + ":" + str(self.port))
+					res = res + 'Nothing!'
+				#print res
+				if (len(s) > 0):
+					res = res + self.show_next(s[0])
+				else:
+					res = res + self.show_next(self.address + ":" + str(self.port))
+				buf = struct.pack(header_format, '1111', len(res))
+				print buf
+				print res
+				connection.send(buf)
 				connection.send(res)
-			elif (s[0] == 'file'):
-				connection.send("begin")
+			elif (cmd == 'file'):
 				print 'receving file...'
-				self.receive_file(connection, s[1])
+				self.receive_file(connection, s[0])
 				print 'file received'
-			elif (s[0] == 'next_node'):
-				self.next_node['address'] = s[1]
-				self.next_node['port'] = int(s[2])
-				self.next_node['hash_code'] = s[3]
-			elif (s[0] == 'upload'):
+			elif (cmd == 'next'):
+				self.next_node['address'] = s[0]
+				self.next_node['port'] = int(s[1])
+				self.next_node['hash_code'] = s[2]
+			elif (cmd == 'upload'):
 				pass
 			connection.close()
 
 if __name__ == '__main__':
 	if len(sys.argv) != 3:
-		print 'Usage: ip port'
+		print 'Usage: server.py ip port'
 	else:
 		server = Server(sys.argv[1], int(sys.argv[2]))
 		server.run()
