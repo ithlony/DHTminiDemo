@@ -28,9 +28,10 @@ class Server:
 			f = open(Server.config_path, 'r')
 			entry_point = f.readline().split(':')
 			f.close()
+			print entry_point
 			self.next_node = self.insert(address = entry_point[0], port = int(entry_point[1]))
 		else:
-			print 'aa'
+			print 'first node in the circle'
 			f = open(Server.config_path, "w")
 			f.write(self.address + ':' + str(port))
 			f.close()
@@ -38,14 +39,27 @@ class Server:
 			self.next_node['port'] = self.port
 			self.next_node['hash_code'] = self.hash_code
 
+	def get_next_node(self, address, port):
+		print address, port
+		sock = self.connect_node(address, port)
+		node_info = self.address + ',' + str(self.port) + ',' + str(self.hash_code)
+		print 'aa'
+		buf = struct.pack(header_format, 'find', len(node_info))
+		sock.send(buf)
+		sock.send(node_info)
+		#response
+		buf = sock.recv(header_len)
+		cmd, datalen = struct.unpack(header_format, buf)
+		buf = sock.recv(datalen)
+		s = buf.split(',')
+		sock.close()
+		return {'address': s[0], 'port': int(s[1]), 'hash_code': s[2]}
+
 	def insert(self, address, port):
 		next_node = {'address': self.address, 'port': self.port, 'hash_code': self.hash_code}
 		if (self.address == address and port == self.port):
 			return next_node
-		sock = self.connect_node(address, port)
-		sock.send('find,' + self.address + ',' + str(self.port) + ',' + str(self.hash_code))
-		sock.close()
-		return next_node
+		return self.get_next_node(address, port)
 
 	def connect_node(self, address, port):
 		sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -55,7 +69,9 @@ class Server:
 	def show_next(self, first_node):
 		if (first_node == self.next_node['address'] + ":" + str(self.next_node['port'])):
 			return ""
-		sock = connect(address, port)
+		print first_node
+		print self.next_node['address'], self.next_node['port']
+		sock = self.connect_node(self.next_node['address'], self.next_node['port'])
 		buf = struct.pack(header_format, 'show', len(first_node))
 		sock.send(buf)
 		sock.send(first_node)
@@ -65,7 +81,7 @@ class Server:
 		sock.close()
 		return buf
 
-	def is_middle(left_node, right_node, mid_node):
+	def is_middle(self, left_node, right_node, mid_node):
 		if (left_node < right_node):
 			if (mid_node > left_node and mid_node < right_node):
 				return True
@@ -77,36 +93,26 @@ class Server:
 		h = new_node['hash_code']
 		address = new_node['address']
 		port = new_node['port']
-		if (self.hash_code == self.next_node['hash_code']):
-			#tell the new node about its address, port and hash_code
-			sock = self.connect_node(address, port)
-			sock.send('next_node,', self.next_node['address'], + ',' + self.next_node['port'] + ',' + self.next_node['hash_code'])
-			sock.close()
-			#tell the next node to tranfer file to new node
-			sock = self.connect_node(next_node['address'], next_node['port'])
-			sock.send('transfer,', address + ',' + port + ',' + h) 
-			sock.close()
+		if (self.hash_code == self.next_node['hash_code'] or self.is_middle(self.hash_code, self.next_node['hash_code'], h)):
+			res = self.next_node['address'] + ',' + str(self.next_node['port']) + ',' + self.next_node['hash_code']
 			self.next_node = new_node
-			return
-		elif (self.is_middle(self.hash_code, self.next_node['hash_code'], h)):
-			#tell the new node about its address, port and hash_code
-			sock = self.connect_node(address, port)
-			sock.send('next_node,', self.next_node['address'], + ',' + self.next_node['port'] + ',' + self.next_node['hash_code'])
-			sock.close()
-			#tell the next node to tranfer file to new node
-			sock = self.connect_node(next_node['address'], next_node['port'])
-			sock.send('transfer,', address + ',' + port + ',' + h) 
-			sock.close()
-			self.next_node = new_node
-			return
+			print self.next_node
+			return res
 
-		sock = self.connect_node(address, port)
-		sock.send('find,', address + ',' + port)
-		sock.recv(Server.buf_size)
+		#find in next_node
+		sock = self.connect_node(self.next_node['address'], self.next_node['port'])
+		data = new_node['address'] + ',' + str(new_node['port']) + ',' + new_node['hash_code']
+		buf = struct.pack(header_format, 'find', len(data))
+		sock.send(buf)
+		sock.send(data)
+		buf = sock.recv(header_len)
+		cmd, datalen = struct.unpack(header_format, buf)
+		data = sock.recv(datalen)
 		sock.close()
+		return data
 
-	def transfer_file(sefl, address, port, target_hash):
-		for file_name in files:
+	def transfer_file(self, address, port, target_hash):
+		for file_name in self.files:
 			m = hashlib.sha1()
 			m.update(file_name)
 			file_hash = m.hexdigest()
@@ -118,23 +124,21 @@ class Server:
 		sock.connect((address, port))
 
 		file_path = dir_path + '/' + file_name
-		sock.send('file,' + file_name)
-		buf = ""
-		while (buf != 'begin'):
-			buf = sock.recv(5)
+		buf = struct.pack(header_format, 'file', len(file_name))
+		sock.send(buf)
+		sock.send(file_name)
 		buf_size = 1024
-		if (buf == 'begin'):
-			sock.send(struct.pack("i", os.stat(file_path).st_size))
-			fp = open(file_path, "rb")
-			while True:
-				data = fp.read(buf_size)
-				if (not data): 
-					break
-				sock.send(data)
-			fp.close()
-			os.remove(file_path)
-			files.remove(file_name)
+		sock.send(struct.pack("i", os.stat(file_path).st_size))
+		fp = open(file_path, "rb")
+		while True:
+			data = fp.read(buf_size)
+			if (not data): 
+				break
+			sock.send(data)
 		sock.close()
+		fp.close()
+		os.remove(file_path)
+		files.remove(file_name)
 
 	def receive_file(self, connection, file_name):
 		buf = connection.recv(struct.calcsize("i"))
@@ -153,13 +157,25 @@ class Server:
 		fp.close()
 		self.files.append(file_name)
 
+	@staticmethod
+	def send_data(connection, data):
+		buf = struct.pack(header_format, 'RRRR', len(data))
+		connection.send(buf)
+		connection.send(data)
+
 	def run(self):
 		sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 		sock.bind((self.address, self.port))
 		print self.address, self.port
 		sock.listen(5)
-		header_format = '4si'
-		header_len = struct.calcsize(header_format)
+		# a new inserted node need to get files from its succesor
+		if (self.next_node['hash_code'] != self.hash_code):
+			ss = self.connect_node(self.next_node['address'], self.next_node['port'])
+			data = self.address + ',' + str(self.port) + ',' + self.hash_code
+			buf = struct.pack(header_format, 'tran', len(data))
+			ss.send(buf)
+			ss.send(data)
+			ss.close
 		while True:
 			connection, address = sock.accept()
 			buf = connection.recv(header_len)
@@ -175,33 +191,27 @@ class Server:
 				self.transfer_file(s[0], s[1], s[2])
 			elif (cmd == 'find'):
 				print s[0], s[1], s[2]
-				self.find({'address': s[0], 'port': s[1], 'hash_code': s[2]})
+				data = self.find({'address': s[0], 'port': int(s[1]), 'hash_code': s[2]})
+				Server.send_data(connection, data)
 			elif (cmd == 'show'):
 				#print cmd
 				res = self.address + ':' + str(self.port) + '\n'
-				if (len(fname) > 0):
+				if (len(self.files) > 0):
 					for fname in self.files:
 						res = res + ' ' + fname
 				else:
-					res = res + 'Nothing!'
-				#print res
+					res = res + ' Nothing!'
+				res = res + '\n'
+				print res
 				if (len(s) > 0):
 					res = res + self.show_next(s[0])
 				else:
 					res = res + self.show_next(self.address + ":" + str(self.port))
-				buf = struct.pack(header_format, '1111', len(res))
-				print buf
-				print res
-				connection.send(buf)
-				connection.send(res)
+				Server.send_data(connection, res)
 			elif (cmd == 'file'):
 				print 'receving file...'
 				self.receive_file(connection, s[0])
 				print 'file received'
-			elif (cmd == 'next'):
-				self.next_node['address'] = s[0]
-				self.next_node['port'] = int(s[1])
-				self.next_node['hash_code'] = s[2]
 			elif (cmd == 'upload'):
 				pass
 			connection.close()

@@ -5,12 +5,14 @@ import os
 import sys
 from package_header import *
 
-def send_req(address, port):
+def send_req(address, port, code = 'show'):
 	sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 	sock.connect((address, port))
 	print address, port
-	#send_file(sock)
-	show_log(sock)
+	if code == 'show':
+		show_log(sock)
+	else:
+		send_file(sock)
 	sock.close()
 
 def show_log(sock):
@@ -42,7 +44,13 @@ def send_file(sock):
 if __name__ == '__main__':
 	address = 'localhost'
 	port = 50000
-	if (len(sys.argv) > 2):
+	argc = len(sys.argv)
+	if (argc > 2):
 		address = sys.argv[1]
 		port = int(sys.argv[2])
-	send_req(address, port)
+	code = "show"
+	if (argc == 2):
+		code = sys.argv[1]
+	elif (argc == 4):
+		code = sys.argv[3]
+	send_req(address, port, code)
