@@ -24,14 +24,17 @@ class Server:
 		self.hash_code = m.hexdigest()
 		self.next_node = {}
 
+		self.logfile = open(self.dir_path + '/' + 'log.txt', 'w')
+
 		if (os.path.exists(Server.config_path) == True):
 			f = open(Server.config_path, 'r')
 			entry_point = f.readline().split(':')
 			f.close()
-			print entry_point
+			self.write_log('Entry_point: %s:%s' %(entry_point[0], entry_point[1]))
+			#print 'Entry_point:', entry_point
 			self.next_node = self.insert(address = entry_point[0], port = int(entry_point[1]))
 		else:
-			print 'first node in the circle'
+			self.write_log('First node in the circle')
 			f = open(Server.config_path, "w")
 			f.write(self.address + ':' + str(port))
 			f.close()
@@ -39,11 +42,15 @@ class Server:
 			self.next_node['port'] = self.port
 			self.next_node['hash_code'] = self.hash_code
 
+	def write_log(self, content):
+		print content
+		self.logfile.write(content + '\n')
+		self.logfile.flush()
+
 	def get_next_node(self, address, port):
-		print address, port
+		#print address, port
 		sock = self.connect_node(address, port)
 		node_info = self.address + ',' + str(self.port) + ',' + str(self.hash_code)
-		print 'aa'
 		buf = struct.pack(header_format, 'find', len(node_info))
 		sock.send(buf)
 		sock.send(node_info)
@@ -69,8 +76,8 @@ class Server:
 	def show_next(self, first_node):
 		if (first_node == self.next_node['address'] + ":" + str(self.next_node['port'])):
 			return ""
-		print first_node
-		print self.next_node['address'], self.next_node['port']
+		#print first_node
+		#print self.next_node['address'], self.next_node['port']
 		sock = self.connect_node(self.next_node['address'], self.next_node['port'])
 		buf = struct.pack(header_format, 'show', len(first_node))
 		sock.send(buf)
@@ -96,7 +103,6 @@ class Server:
 		if (self.hash_code == self.next_node['hash_code'] or self.is_middle(self.hash_code, self.next_node['hash_code'], h)):
 			res = self.next_node['address'] + ',' + str(self.next_node['port']) + ',' + self.next_node['hash_code']
 			self.next_node = new_node
-			print self.next_node
 			return res
 
 		#find in next_node
@@ -119,9 +125,10 @@ class Server:
 			if (self.is_middle(file_hash, self.hash_code, target_hash)):
 				self.send_file(address, port, file_name)
 
-	def send_file(self,address, port, file_name):
+	def send_file(self, address, port, file_name):
 		sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-		print address, port
+		self.write_log('Send %s to %s:%s' %(file_name, address, str(port)))
+		#print 'Send', file_name, 'to', address, port
 		sock.connect((address, port))
 
 		file_path = self.dir_path + '/' + file_name
@@ -145,7 +152,7 @@ class Server:
 		buf = connection.recv(struct.calcsize("i"))
 		#unpack return a tuple
 		file_size = struct.unpack("i", buf)[0]
-		print 'file size:', file_size
+		#print 'file size:', file_size
 		file_path = self.dir_path + '/' + file_name 
 		fp = open(file_path, "wb")
 		while file_size > 0:
@@ -190,7 +197,7 @@ class Server:
 	def run(self):
 		sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 		sock.bind((self.address, self.port))
-		print self.address, self.port
+		print 'Serving at ' + self.address + ':' + str(self.port)
 		sock.listen(5)
 		# a new inserted node need to get files from its succesor
 		if (self.next_node['hash_code'] != self.hash_code):
@@ -201,12 +208,13 @@ class Server:
 			ss.send(data)
 			ss.close
 		while True:
+			print '----------------------------\nWaiting for new request...'
 			connection, address = sock.accept()
 			buf = connection.recv(header_len)
 			cmd, datalen = struct.unpack(header_format, buf)
 			s = []
-			#print cmd, datalen
-			print cmd
+			self.write_log('Command: %s' % cmd)
+			#print cmd
 			if (datalen > 0):
 				buf = connection.recv(datalen)
 				s = buf.split(',')
@@ -214,32 +222,34 @@ class Server:
 			if (cmd == 'tran'):
 				self.transfer_file(s[0], int(s[1]), s[2])
 			elif (cmd == 'find'):
-				print s[0], s[1], s[2]
+				#print s[0], s[1], s[2]
 				data = self.find({'address': s[0], 'port': int(s[1]), 'hash_code': s[2]})
 				Server.send_data(connection, data)
 			elif (cmd == 'posi'):
-				print s[0]
+				#print s[0]
 				data = self.find_file_position(s[0])
 				Server.send_data(connection, data)
 			elif (cmd == 'show'):
 				#print cmd
-				res = self.address + ':' + str(self.port) + '\n'
+				res = '\n***** ' + self.address + ':' + str(self.port) + ' *****\n'
 				if (len(self.files) > 0):
 					for fname in self.files:
 						res = res + ' ' + fname
 				else:
 					res = res + ' Nothing!'
 				res = res + '\n'
-				print res
+				#print res
 				if (len(s) > 0):
 					res = res + self.show_next(s[0])
 				else:
 					res = res + self.show_next(self.address + ":" + str(self.port))
 				Server.send_data(connection, res)
 			elif (cmd == 'file'):
-				print 'receving file...'
+				self.write_log('Receiving %s' % s[0])
+				#print 'Receiving', s[0]
 				self.receive_file(connection, s[0])
-				print 'file received'
+				self.write_log('%s received!' % s[0])
+				#print s[0], 'received!'
 			elif (cmd == 'uplo'):
 				data = self.find_upload_entry(s[0])
 				Server.send_data(connection, data)
