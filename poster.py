@@ -16,7 +16,7 @@ def send_req(address, port, code = 'show'):
 	sock.close()
 
 def show_log(sock):
-	file_path = "a.txt"
+	file_path = "b.txt"
 	buf = struct.pack(header_format, 'show', 0)
 	print buf
 	sock.send(buf)
@@ -27,7 +27,7 @@ def show_log(sock):
 	print buf
 
 def send_file(sock):
-	file_path = "a.txt"
+	file_path = "b.txt"
 	buf = struct.pack(header_format, 'file', 5)
 	sock.send(buf)
 	sock.send(file_path)
@@ -43,7 +43,7 @@ def send_file(sock):
 
 if __name__ == '__main__':
 	address = 'localhost'
-	port = 50000
+	port = 10000
 	argc = len(sys.argv)
 	if (argc > 2):
 		address = sys.argv[1]

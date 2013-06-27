@@ -119,11 +119,12 @@ class Server:
 			if (self.is_middle(file_hash, self.hash_code, target_hash)):
 				self.send_file(address, port, file_name)
 
-	def send_file(address, port, file_name):
+	def send_file(self,address, port, file_name):
 		sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+		print address, port
 		sock.connect((address, port))
 
-		file_path = dir_path + '/' + file_name
+		file_path = self.dir_path + '/' + file_name
 		buf = struct.pack(header_format, 'file', len(file_name))
 		sock.send(buf)
 		sock.send(file_name)
@@ -138,7 +139,7 @@ class Server:
 		sock.close()
 		fp.close()
 		os.remove(file_path)
-		files.remove(file_name)
+		self.files.remove(file_name)
 
 	def receive_file(self, connection, file_name):
 		buf = connection.recv(struct.calcsize("i"))
@@ -162,6 +163,29 @@ class Server:
 		buf = struct.pack(header_format, 'RRRR', len(data))
 		connection.send(buf)
 		connection.send(data)
+
+	def find_file_position(self, file_hash):
+		if (self.hash_code == self.next_node['hash_code'] or self.is_middle(self.hash_code, self.next_node['hash_code'], file_hash)):
+			return self.next_node['address'] + ',' + str(self.next_node['port'])
+
+		sock = self.connect_node(self.next_node['address'], self.next_node['port'])
+		data = file_hash
+		buf = struct.pack(header_format, 'posi', len(data))
+		sock.send(buf)
+		sock.send(data)
+
+		buf = sock.recv(header_len)
+		cmd, datalen = struct.unpack(header_format, buf)
+		data = sock.recv(datalen)
+		sock.close()
+		return data
+
+
+	def find_upload_entry(self, file_name):
+		m = hashlib.sha1()
+		m.update(file_name)
+		file_hash = m.hexdigest()
+		return self.find_file_position(file_hash)
 
 	def run(self):
 		sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -188,10 +212,14 @@ class Server:
 				s = buf.split(',')
 			#print s, datalen, buf
 			if (cmd == 'tran'):
-				self.transfer_file(s[0], s[1], s[2])
+				self.transfer_file(s[0], int(s[1]), s[2])
 			elif (cmd == 'find'):
 				print s[0], s[1], s[2]
 				data = self.find({'address': s[0], 'port': int(s[1]), 'hash_code': s[2]})
+				Server.send_data(connection, data)
+			elif (cmd == 'posi'):
+				print s[0]
+				data = self.find_file_position(s[0])
 				Server.send_data(connection, data)
 			elif (cmd == 'show'):
 				#print cmd
@@ -212,8 +240,9 @@ class Server:
 				print 'receving file...'
 				self.receive_file(connection, s[0])
 				print 'file received'
-			elif (cmd == 'upload'):
-				pass
+			elif (cmd == 'uplo'):
+				data = self.find_upload_entry(s[0])
+				Server.send_data(connection, data)
 			connection.close()
 
 if __name__ == '__main__':
